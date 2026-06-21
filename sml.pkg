@@ -1,0 +1,3 @@
+package github.com/sjqtentacles/sml-msgpack
+require {
+}
