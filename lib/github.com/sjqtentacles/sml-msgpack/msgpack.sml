@@ -226,7 +226,11 @@ struct
           val mantR = Real.fromInt mHi * 4294967296.0 + Real.fromInt mLo
         in
           if exp = 0 then
-            Float (sign * mantR * Math.pow (2.0, ~1074.0))
+            (* Subnormals and zero. Use an explicit zero fast-path so that
+               +0.0 never round-trips to -0.0 (and to avoid relying on
+               denormal multiplication, which differs across Poly/ML builds). *)
+            if mHi = 0 andalso mLo = 0 then Float 0.0
+            else Float (sign * mantR * Math.pow (2.0, ~1074.0))
           else if exp = 2047 then
             if mHi = 0 andalso mLo = 0 then Float (sign * Real.posInf)
             else Float (0.0 / 0.0)
