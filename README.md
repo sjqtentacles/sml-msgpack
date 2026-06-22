@@ -1,5 +1,7 @@
 # sml-msgpack
 
+[![CI](https://github.com/sjqtentacles/sml-msgpack/actions/workflows/ci.yml/badge.svg)](https://github.com/sjqtentacles/sml-msgpack/actions/workflows/ci.yml)
+
 MessagePack binary serialization (spec v2.0) in pure Standard ML
 
 ## Installation
