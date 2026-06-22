@@ -45,6 +45,44 @@ struct
         ; Harness.check name false )
     end
 
+  fun checkCanonical (name : string) (item : Msgpack.t) (expected : string) =
+    let val actual = Msgpack.encodeCanonical item
+    in
+      if actual = expected then
+        Harness.check name true
+      else
+        ( print ("  FAIL - " ^ name ^ ": expected " ^ hexDump expected ^
+                 " got " ^ hexDump actual ^ "\n")
+        ; Harness.check name false )
+    end
+
+  (* decode (encodeCanonical v) re-encodes canonically to the same bytes.
+     (The datatype `t` carries a `real`, so it is not an equality type; we
+     compare canonical byte strings, which is the meaningful invariant.) *)
+  fun roundtripCanonical name item =
+    let val enc = Msgpack.encodeCanonical item
+        val dec = Msgpack.decode enc
+    in
+      if Msgpack.encodeCanonical dec = enc then
+        Harness.check name true
+      else
+        ( print ("  FAIL - " ^ name ^ ": canonical roundtrip mismatch " ^
+                 hexDump enc ^ "vs " ^ hexDump (Msgpack.encodeCanonical dec) ^ "\n")
+        ; Harness.check name false )
+    end
+
+  (* encodeCanonical must equal encode on any map-free value. *)
+  fun checkAgreesWithEncode name item =
+    let val c = Msgpack.encodeCanonical item
+        val e = Msgpack.encode item
+    in
+      if c = e then Harness.check name true
+      else
+        ( print ("  FAIL - " ^ name ^ ": canonical " ^ hexDump c ^
+                 " <> encode " ^ hexDump e ^ "\n")
+        ; Harness.check name false )
+    end
+
   fun run () =
     let
       val () = Harness.reset ()
@@ -168,6 +206,64 @@ struct
                  (fn () => Msgpack.decode (bs [0xcd, 0x01]))
       val () = Harness.checkRaises "decode empty"
                  (fn () => Msgpack.decode "")
+
+      (* ---------------------------------------------------------------- *)
+      (* Section 7: Canonical encoding                                    *)
+      (* ---------------------------------------------------------------- *)
+      val () = Harness.section "Canonical encoding"
+
+      (* fixmap {1:2, 3:4} -> 82 01 02 03 04 *)
+      val () = checkCanonical "Canonical fixmap {1:2,3:4}"
+                 (Msgpack.Map [(ii 1, ii 2), (ii 3, ii 4)])
+                 (bs [0x82, 0x01, 0x02, 0x03, 0x04])
+
+      (* Determinism: integer keys 5,1,3,2 supplied scrambled, with values
+         50,10,30,20; canonical output sorts keys ascending (1,2,3,5):
+           84 01 0a 02 14 03 1e 05 32 *)
+      val () = checkCanonical "Canonical scrambled int keys -> sorted"
+                 (Msgpack.Map [ (ii 5, ii 50), (ii 1, ii 10)
+                              , (ii 3, ii 30), (ii 2, ii 20) ])
+                 (bs [0x84, 0x01, 0x0a, 0x02, 0x14, 0x03, 0x1e, 0x05, 0x32])
+
+      (* String keys "b","a" scrambled -> "a" emitted before "b":
+           82 a1 61 01 a1 62 02 *)
+      val () = checkCanonical "Canonical scrambled str keys -> sorted"
+                 (Msgpack.Map [ (Msgpack.Str "b", ii 2)
+                              , (Msgpack.Str "a", ii 1) ])
+                 (bs [0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0x02])
+
+      (* Recursion into nested maps: outer keys "z","a" and an inner map with
+         keys 2,1 (all scrambled) both come out sorted. Outer "a" < "z";
+         inner 1 < 2. *)
+      val nestedScrambled =
+        Msgpack.Map [ (Msgpack.Str "z", Msgpack.Map [(ii 2, ii 20), (ii 1, ii 10)])
+                    , (Msgpack.Str "a", ii 1) ]
+      val () = checkCanonical "Canonical nested map sorted recursively"
+                 nestedScrambled
+                 (bs [ 0x82
+                     , 0xa1, 0x61, 0x01                       (* "a": 1 *)
+                     , 0xa1, 0x7a                             (* "z": *)
+                     , 0x82, 0x01, 0x0a, 0x02, 0x14 ])        (*   {1:10,2:20} *)
+
+      (* encodeCanonical agrees with encode on map-free values *)
+      val () = checkAgreesWithEncode "Canonical = encode: Nil" Msgpack.Nil
+      val () = checkAgreesWithEncode "Canonical = encode: Int 256" (ii 256)
+      val () = checkAgreesWithEncode "Canonical = encode: Str hello"
+                 (Msgpack.Str "hello")
+      val () = checkAgreesWithEncode "Canonical = encode: Array"
+                 (Msgpack.Array [ii 1, ii 2, ii 3])
+      val () = checkAgreesWithEncode "Canonical = encode: Bin"
+                 (Msgpack.Bin (bs [0xde, 0xad]))
+
+      (* decode (encodeCanonical v) re-encodes canonically to the same bytes *)
+      val () = roundtripCanonical "Canonical RT Int" (ii 70000)
+      val () = roundtripCanonical "Canonical RT Str" (Msgpack.Str "hello")
+      val () = roundtripCanonical "Canonical RT Array"
+                 (Msgpack.Array [ii 1, ii 2, ii 3])
+      val () = roundtripCanonical "Canonical RT scrambled map"
+                 (Msgpack.Map [ (ii 5, ii 50), (ii 1, ii 10)
+                              , (ii 3, ii 30), (ii 2, ii 20) ])
+      val () = roundtripCanonical "Canonical RT nested map" nestedScrambled
 
     in
       Harness.run ()

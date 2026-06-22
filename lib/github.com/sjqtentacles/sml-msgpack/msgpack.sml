@@ -179,6 +179,67 @@ struct
     | Ext (typ, data) => encodeExt (typ, data)
 
   (* ------------------------------------------------------------------ *)
+  (* Canonical encoder                                                    *)
+  (*                                                                      *)
+  (* Same minimal byte choices as `encode` (which already selects the     *)
+  (* shortest format family) but with map keys ordered deterministically: *)
+  (* each key is canonically encoded to bytes, and entries are sorted by  *)
+  (* those key bytes under plain byte-string comparison (byte by byte; a  *)
+  (* shorter prefix sorts first). Recurses into nested maps and arrays.   *)
+  (* ------------------------------------------------------------------ *)
+
+  fun arrayHeader (len : int) : string =
+    if len <= 15 then byteStr (IntInf.fromInt (0x90 + len))
+    else if len <= 65535 then
+      byteStr (IntInf.fromInt 0xdc) ^ beBytes 2 (IntInf.fromInt len)
+    else
+      byteStr (IntInf.fromInt 0xdd) ^ beBytes 4 (IntInf.fromInt len)
+
+  fun mapHeader (len : int) : string =
+    if len <= 15 then byteStr (IntInf.fromInt (0x80 + len))
+    else if len <= 65535 then
+      byteStr (IntInf.fromInt 0xde) ^ beBytes 2 (IntInf.fromInt len)
+    else
+      byteStr (IntInf.fromInt 0xdf) ^ beBytes 4 (IntInf.fromInt len)
+
+  (* Stable merge sort of map entries by their canonical key bytes, using
+     String.compare (bytewise; a shorter prefix sorts first). Stable so that
+     entries with identical key bytes keep their original relative order. *)
+  fun sortEntries (entries : (string * string) list) : (string * string) list =
+    let
+      fun merge ([], ys) = ys
+        | merge (xs, []) = xs
+        | merge (x :: xs, y :: ys) =
+            (case String.compare (#1 x, #1 y) of
+               GREATER => y :: merge (x :: xs, ys)
+             | _       => x :: merge (xs, y :: ys))
+      fun split [] = ([], [])
+        | split [a] = ([a], [])
+        | split (a :: b :: rest) =
+            let val (l, r) = split rest in (a :: l, b :: r) end
+      fun sort [] = []
+        | sort [a] = [a]
+        | sort xs =
+            let val (l, r) = split xs in merge (sort l, sort r) end
+    in sort entries end
+
+  fun encodeCanonical (item : t) : string =
+    case item of
+      Array elems =>
+        arrayHeader (List.length elems) ^
+        String.concat (List.map encodeCanonical elems)
+    | Map pairs =>
+        let
+          val entries =
+            List.map (fn (k, v) => (encodeCanonical k, encodeCanonical v)) pairs
+          val sorted = sortEntries entries
+        in
+          mapHeader (List.length pairs) ^
+          String.concat (List.map (fn (kb, vb) => kb ^ vb) sorted)
+        end
+    | other => encode other
+
+  (* ------------------------------------------------------------------ *)
   (* Decoder                                                              *)
   (* ------------------------------------------------------------------ *)
 

@@ -65,6 +65,27 @@ bin8/16/32, fixarray/array16/32, fixmap/map16/32, fixext/ext8/16/32).
 `decode : string -> t` parses a value and raises `Fail` on malformed input.
 All multibyte integers are big-endian per the MessagePack specification.
 
+`encodeCanonical : t -> string` produces a *canonical* encoding so that equal
+values always serialize to identical bytes. MessagePack has no official
+canonical spec, so this library defines one:
+
+- **Minimal encoding** — every value uses the shortest format family. The
+  plain `encode` already does this, so `encodeCanonical` reuses it for all
+  non-map values (and is byte-for-byte equal to `encode` on any map-free
+  value).
+- **Sorted map keys** — within every map, each key is itself canonically
+  encoded to bytes, and the entries are emitted in ascending *bytewise
+  lexicographic* order of those key bytes (compared byte by byte, with a
+  shorter prefix sorting first). This is applied recursively to nested maps
+  and arrays.
+
+```sml
+(* Keys are sorted by their encoded bytes, regardless of insertion order. *)
+val m = Msgpack.Map [ (Msgpack.Int (IntInf.fromInt 3), Msgpack.Int (IntInf.fromInt 4))
+                    , (Msgpack.Int (IntInf.fromInt 1), Msgpack.Int (IntInf.fromInt 2)) ]
+val () = print (Msgpack.encodeCanonical m)   (* 0x82 0x01 0x02 0x03 0x04 *)
+```
+
 ## Testing
 
 ```
